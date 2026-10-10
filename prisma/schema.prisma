@@ -1,0 +1,178 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This model contains an index with non-default null sort order and requires additional setup for migrations. Visit https://pris.ly/d/default-index-null-ordering for more info.
+model conversations {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  match_id        String     @unique @db.Uuid
+  last_message_at DateTime?  @db.Timestamptz(6)
+  created_at      DateTime   @default(now()) @db.Timestamptz(6)
+  matches         matches    @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  messages        messages[]
+
+  @@index([last_message_at(sort: Desc)], map: "conversations_last_message_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model matches {
+  id                            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user1_id                      String         @db.Uuid
+  user2_id                      String         @db.Uuid
+  status                        match_status   @default(active)
+  matched_at                    DateTime       @default(now()) @db.Timestamptz(6)
+  unmatched_at                  DateTime?      @db.Timestamptz(6)
+  conversations                 conversations?
+  users_matches_user1_idTousers users          @relation("matches_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_matches_user2_idTousers users          @relation("matches_user2_idTousers", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user1_id, user2_id], map: "matches_pair_uq")
+  @@index([status])
+  @@index([user2_id], map: "matches_user2_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model messages {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id String        @db.Uuid
+  sender_id       String        @db.Uuid
+  content         String
+  message_type    message_type  @default(text)
+  is_read         Boolean       @default(false)
+  read_at         DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  conversations   conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([conversation_id, created_at(sort: Desc)], map: "messages_conv_created_idx")
+  @@index([sender_id], map: "messages_sender_idx")
+  @@index([conversation_id], map: "messages_unread_idx", where: raw("(NOT is_read)"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
+model photos {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @unique(map: "photos_one_primary_per_user", where: raw("is_primary")) @db.Uuid
+  url        String
+  position   Int      @default(0) @db.SmallInt
+  is_primary Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, position], map: "photos_user_position_uq")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model preferences {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String          @unique @db.Uuid
+  interested_in   interested_type @default(everyone)
+  age_min         Int             @default(18) @db.SmallInt
+  age_max         Int             @default(99) @db.SmallInt
+  max_distance_km Int             @default(50)
+  show_me         Boolean         @default(true)
+  updated_at      DateTime        @default(now()) @db.Timestamptz(6)
+  users           users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model profiles {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String      @unique @db.Uuid
+  display_name String      @db.VarChar(50)
+  birth_date   DateTime    @db.Date
+  gender       gender_type
+  bio          String?
+  job_title    String?     @db.VarChar(100)
+  height_cm    Int?        @db.SmallInt
+  city         String?     @db.VarChar(100)
+  latitude     Decimal?    @db.Decimal(9, 6)
+  longitude    Decimal?    @db.Decimal(9, 6)
+  is_verified  Boolean     @default(false)
+  users        users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([birth_date], map: "profiles_birth_idx")
+  @@index([gender])
+  @@index([latitude, longitude], map: "profiles_geo_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model swipes {
+  id                            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  swiper_id                     String       @db.Uuid
+  swiped_id                     String       @db.Uuid
+  action                        swipe_action
+  created_at                    DateTime     @default(now()) @db.Timestamptz(6)
+  users_swipes_swiped_idTousers users        @relation("swipes_swiped_idTousers", fields: [swiped_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_swipes_swiper_idTousers users        @relation("swipes_swiper_idTousers", fields: [swiper_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([swiper_id, swiped_id], map: "swipes_pair_uq")
+  @@index([swiped_id, action], map: "swipes_swiped_action_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model users {
+  id                              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                           String?      @db.VarChar(255)
+  phone                           String?      @unique(map: "users_phone_uq") @db.VarChar(20)
+  password_hash                   String?
+  status                          user_status  @default(active)
+  last_active_at                  DateTime?    @db.Timestamptz(6)
+  created_at                      DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime     @default(now()) @db.Timestamptz(6)
+  matches_matches_user1_idTousers matches[]    @relation("matches_user1_idTousers")
+  matches_matches_user2_idTousers matches[]    @relation("matches_user2_idTousers")
+  messages                        messages[]
+  photos                          photos?
+  preferences                     preferences?
+  profiles                        profiles?
+  swipes_swipes_swiped_idTousers  swipes[]     @relation("swipes_swiped_idTousers")
+  swipes_swipes_swiper_idTousers  swipes[]     @relation("swipes_swiper_idTousers")
+
+  @@index([last_active_at(sort: Desc)], map: "users_last_active_idx")
+  @@index([status])
+}
+
+enum gender_type {
+  male
+  female
+  non_binary
+  other
+}
+
+enum interested_type {
+  male
+  female
+  everyone
+}
+
+enum match_status {
+  active
+  unmatched
+}
+
+enum message_type {
+  text
+  image
+  gif
+}
+
+enum swipe_action {
+  like
+  pass
+  super_like
+}
+
+enum user_status {
+  active
+  suspended
+  deleted
+}
