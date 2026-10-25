@@ -47,10 +47,19 @@ src/
     │   ├── chat.routes.ts
     │   └── chat.service.ts
     ├── matches/
+    │   ├── matches.container.ts
     │   ├── matches.controller.ts
     │   ├── matches.repository.ts
     │   ├── matches.routes.ts
     │   └── matches.service.ts
+    │   └── matches.validation.ts
+    ├── preferences/
+    │   ├── preferences.container.ts
+    │   ├── preferences.controller.ts
+    │   ├── preferences.repository.ts
+    │   ├── preferences.routes.ts
+    │   ├── preferences.service.ts
+    │   └── preferences.validation.ts
     ├── profiles/
     │   ├── profiles.container.ts
     │   ├── profiles.controller.ts
@@ -70,6 +79,7 @@ src/
     │   ├── swipes.service.ts
     │   └── swipes.validation.ts
     └── users/
+        ├── users.container.ts
         ├── users.controller.ts
         ├── users.repository.ts
         ├── users.routes.ts
