@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/app.ts",
+    "seed": "tsx src/seed.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node dist/app.js",
     "build": "tsc",
@@ -28,6 +29,7 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "firebase-admin": "^12.2.0",
     "google-auth-library": "^11.3.1",
     "multer": "^2.5.0",
     "pg": "^8.23.1",

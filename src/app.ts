@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Router } from "express";
 import cors from "./config/cors.js";
 import "dotenv/config";
 import profilesRouter from "./modules/profiles/profiles.routes.js";
@@ -35,7 +35,6 @@ app.use("/api/preferences", preferencesRouter);
 app.use("/api/matches", matchesRouter);
 app.use("/api/recommendations", recommendationsRouter);
 app.use("/auth", authRouter);
-
 
 app.use(notFoundHandler);
 app.use(errorHandler);

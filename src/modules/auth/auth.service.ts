@@ -1,6 +1,7 @@
 import { OAuth2Client } from "google-auth-library";
 import { hashPassword, verifyPassword } from "../users/users.service.js";
 import { AuthRepository } from "./auth.repository.js";
+import { FirebaseService } from "../../services/firebase.service.js";
 import type { LoginInput, RegisterInput } from "./auth.validation.js";
 
 export class AuthError extends Error {
@@ -12,6 +13,7 @@ export class AuthError extends Error {
 
 export class AuthService {
   private readonly googleClient = new OAuth2Client();
+  private readonly firebaseService = new FirebaseService();
 
   constructor(private readonly authRepository: AuthRepository) {}
 
@@ -129,5 +131,71 @@ export class AuthService {
 
   private isUniqueConstraintError(error: unknown): boolean {
     return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
+  }
+
+  async signInWithFirebase(idToken: string) {
+    if (!this.firebaseService.isConfigured()) {
+      throw new AuthError(500, "Firebase is not configured on the server");
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await this.firebaseService.verifyIdToken(idToken);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Firebase")) {
+        throw error;
+      }
+      throw new AuthError(401, "Invalid or expired Firebase ID token");
+    }
+
+    const firebaseUid = decodedToken.uid;
+    const email = decodedToken.email_verified && decodedToken.email
+      ? decodedToken.email.trim().toLowerCase()
+      : null;
+
+    const existingUser = await this.authRepository.findByFirebaseUid(firebaseUid);
+    if (existingUser) {
+      if (existingUser.status !== "active") {
+        throw new AuthError(403, "This account is not active");
+      }
+
+      return {
+        user: await this.authRepository.recordSignIn(existingUser.id),
+        isNewUser: false,
+      };
+    }
+
+    try {
+      const user = await this.authRepository.createFirebaseUser(firebaseUid, email);
+      return { user, isNewUser: true };
+    } catch (error) {
+      // A concurrent first sign-in may have inserted this Firebase UID after our lookup.
+      let userCreatedByConcurrentRequest = await this.authRepository.findByFirebaseUid(firebaseUid);
+
+      // The database may enforce unique emails for existing password accounts. Keep Firebase
+      // identity keyed by UID instead of silently linking it to an account by email.
+      if (!userCreatedByConcurrentRequest && email && this.isUniqueConstraintError(error)) {
+        try {
+          const user = await this.authRepository.createFirebaseUser(firebaseUid, null);
+          return { user, isNewUser: true };
+        } catch (retryError) {
+          userCreatedByConcurrentRequest = await this.authRepository.findByFirebaseUid(firebaseUid);
+          if (!userCreatedByConcurrentRequest) {
+            throw retryError;
+          }
+        }
+      }
+
+      if (!userCreatedByConcurrentRequest) throw error;
+
+      if (userCreatedByConcurrentRequest.status !== "active") {
+        throw new AuthError(403, "This account is not active");
+      }
+
+      return {
+        user: await this.authRepository.recordSignIn(userCreatedByConcurrentRequest.id),
+        isNewUser: false,
+      };
+    }
   }
 }
