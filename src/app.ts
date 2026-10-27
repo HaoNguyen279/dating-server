@@ -4,8 +4,11 @@ import "dotenv/config";
 import profilesRouter from "./modules/profiles/profiles.routes.js";
 import swipesRouter from "./modules/swipes/swipes.routes.js";
 import usersRouter from "./modules/users/users.routes.js";
+import photosRouter from "./modules/photos/photos.routes.js";
 import preferencesRouter from "./modules/preferences/preferences.routes.js";
 import matchesRouter from "./modules/matches/matches.routes.js";
+import recommendationsRouter from "./modules/recommendations/recommendations.routes.js";
+import authRouter from "./modules/auth/auth.routes.js";
 import { notFoundHandler } from "./middlewares/not-found.js";
 import { errorHandler } from "./middlewares/error-handler.js";
 
@@ -27,8 +30,12 @@ app.get("/", (_req, res) => {
 app.use("/api/profiles", profilesRouter);
 app.use("/api/swipes", swipesRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/users", photosRouter);
 app.use("/api/preferences", preferencesRouter);
 app.use("/api/matches", matchesRouter);
+app.use("/api/recommendations", recommendationsRouter);
+app.use("/auth", authRouter);
+
 
 app.use(notFoundHandler);
 app.use(errorHandler);

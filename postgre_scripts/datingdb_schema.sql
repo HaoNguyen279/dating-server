@@ -63,6 +63,7 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE users (
     id                  uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
     email               varchar(255),
+    google_sub          varchar(255) UNIQUE,
     phone               varchar(20),
     password_hash       text,                                  -- NULL nếu chỉ đăng nhập bằng Google/Facebook/OTP
     email_verified_at   timestamptz,

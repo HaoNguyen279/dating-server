@@ -59,13 +59,14 @@ model messages {
 /// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
 model photos {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String   @unique(map: "photos_one_primary_per_user", where: raw("is_primary")) @db.Uuid
+  user_id    String   @db.Uuid
   url        String
   position   Int      @default(0) @db.SmallInt
   is_primary Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
   users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@unique([user_id], map: "photos_one_primary_per_user", where: raw("is_primary"))
   @@unique([user_id, position], map: "photos_user_position_uq")
 }
 
@@ -79,6 +80,7 @@ model preferences {
   max_distance_km Int             @default(50)
   show_me         Boolean         @default(true)
   updated_at      DateTime        @default(now()) @db.Timestamptz(6)
+  interested_languages String[]        @db.VarChar(50)
   users           users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
@@ -91,11 +93,15 @@ model profiles {
   gender       gender_type
   bio          String?
   job_title    String?     @db.VarChar(100)
+  pets         String[]    @db.VarChar(50)
+  life_style   String[]    @db.VarChar(50)
+  education    String?     @db.VarChar(100)
   height_cm    Int?        @db.SmallInt
   city         String?     @db.VarChar(100)
   latitude     Decimal?    @db.Decimal(9, 6)
   longitude    Decimal?    @db.Decimal(9, 6)
   is_verified  Boolean     @default(false)
+  languages   String[]    @db.VarChar(50)
   users        users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([birth_date], map: "profiles_birth_idx")
@@ -122,6 +128,7 @@ model swipes {
 model users {
   id                              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                           String?      @db.VarChar(255)
+  google_sub                      String?      @unique(map: "users_google_sub_uq") @db.VarChar(255)
   phone                           String?      @unique(map: "users_phone_uq") @db.VarChar(20)
   password_hash                   String?
   status                          user_status  @default(active)
@@ -131,7 +138,7 @@ model users {
   matches_matches_user1_idTousers matches[]    @relation("matches_user1_idTousers")
   matches_matches_user2_idTousers matches[]    @relation("matches_user2_idTousers")
   messages                        messages[]
-  photos                          photos?
+  photos                          photos[]
   preferences                     preferences?
   profiles                        profiles?
   swipes_swipes_swiped_idTousers  swipes[]     @relation("swipes_swiped_idTousers")
