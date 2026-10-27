@@ -74,4 +74,33 @@ export class AuthRepository {
       select: authUserSelect,
     });
   }
+
+  async findByFirebaseUid(firebaseUid: string) {
+    return prisma.users.findUnique({
+      where: { firebase_uid: firebaseUid },
+      select: authUserSelect,
+    });
+  }
+
+  async createFirebaseUser(firebaseUid: string, email: string | null) {
+    return prisma.users.create({
+      data: {
+        firebase_uid: firebaseUid,
+        email,
+        last_active_at: new Date(),
+      },
+      select: authUserSelect,
+    });
+  }
+
+  async linkFirebaseToExisting(id: string, firebaseUid: string) {
+    return prisma.users.update({
+      where: { id },
+      data: {
+        firebase_uid: firebaseUid,
+        updated_at: new Date(),
+      },
+      select: authUserSelect,
+    });
+  }
 }
