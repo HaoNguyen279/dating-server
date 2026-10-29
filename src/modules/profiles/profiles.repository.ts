@@ -12,6 +12,10 @@ export interface ProfileData {
   latitude?: number | null;
   longitude?: number | null;
   is_verified?: boolean;
+  education?: string | null;
+  pets?: string[];
+  life_style?: string[];
+  languages?: string[];
 }
 
 export interface FindProfilesOptions {
@@ -117,6 +121,10 @@ export class ProfilesRepository {
         latitude: data.latitude !== undefined && data.latitude !== null ? data.latitude : null,
         longitude: data.longitude !== undefined && data.longitude !== null ? data.longitude : null,
         is_verified: data.is_verified ?? false,
+        education: data.education ?? null,
+        pets: data.pets ?? [],
+        life_style: data.life_style ?? [],
+        languages: data.languages ?? [],
       },
     });
   }
@@ -153,6 +161,10 @@ export class ProfilesRepository {
         latitude: data.latitude !== undefined && data.latitude !== null ? data.latitude : null,
         longitude: data.longitude !== undefined && data.longitude !== null ? data.longitude : null,
         is_verified: data.is_verified ?? false,
+        education: data.education ?? null,
+        pets: data.pets ?? [],
+        life_style: data.life_style ?? [],
+        languages: data.languages ?? [],
       },
       update: data,
     });

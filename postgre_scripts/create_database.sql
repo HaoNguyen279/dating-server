@@ -34,6 +34,8 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE users (
     id              uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
     email           varchar(255),
+    google_sub      varchar(255),
+    firebase_uid    varchar(255),
     phone           varchar(20),
     password_hash   text,                                  -- NULL nếu đăng nhập bằng OAuth/OTP
     status          user_status  NOT NULL DEFAULT 'active',
@@ -43,7 +45,7 @@ CREATE TABLE users (
 
     -- Phải có ít nhất một cách đăng nhập
     CONSTRAINT users_contact_required
-        CHECK (email IS NOT NULL OR phone IS NOT NULL),
+        CHECK (email IS NOT NULL OR phone IS NOT NULL OR google_sub IS NOT NULL OR firebase_uid IS NOT NULL),
     CONSTRAINT users_email_format
         CHECK (email IS NULL OR email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
     CONSTRAINT users_phone_format
@@ -52,6 +54,8 @@ CREATE TABLE users (
 
 -- Email không phân biệt hoa thường; phone unique (NULL được phép lặp)
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
+CREATE UNIQUE INDEX users_google_sub_uq ON users (google_sub);
+CREATE UNIQUE INDEX users_firebase_uid_uq ON users (firebase_uid);
 CREATE UNIQUE INDEX users_phone_uq ON users (phone);
 CREATE INDEX users_status_idx      ON users (status);
 CREATE INDEX users_last_active_idx ON users (last_active_at DESC);

@@ -69,6 +69,10 @@ export const createProfileSchema = z
     latitude: z.coerce.number().min(-90).max(90).optional().nullable(),
     longitude: z.coerce.number().min(-180).max(180).optional().nullable(),
     is_verified: z.boolean().optional().default(false),
+    education: z.string().trim().max(100).optional().nullable(),
+    pets: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .superRefine(validateGeoPair);
 
@@ -89,6 +93,10 @@ export const updateProfileSchema = z
     latitude: z.coerce.number().min(-90).max(90).optional().nullable(),
     longitude: z.coerce.number().min(-180).max(180).optional().nullable(),
     is_verified: z.boolean().optional(),
+    education: z.string().trim().max(100).optional().nullable(),
+    pets: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided for update",
