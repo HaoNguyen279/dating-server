@@ -35,6 +35,10 @@ export class ProfilesService {
       where.city = { contains: query.city, mode: "insensitive" };
     }
 
+    if (query.ward) {
+      where.ward = { contains: query.ward, mode: "insensitive" };
+    }
+
     if (query.is_verified !== undefined) {
       where.is_verified = query.is_verified;
     }
@@ -61,6 +65,7 @@ export class ProfilesService {
       where.OR = [
         { display_name: { contains: term, mode: "insensitive" } },
         { city: { contains: term, mode: "insensitive" } },
+        { ward: { contains: term, mode: "insensitive" } },
         { job_title: { contains: term, mode: "insensitive" } },
       ];
     }

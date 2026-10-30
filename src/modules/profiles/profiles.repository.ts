@@ -9,12 +9,14 @@ export interface ProfileData {
   job_title?: string | null;
   height_cm?: number | null;
   city?: string | null;
+  ward?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   is_verified?: boolean;
   education?: string | null;
-  pets?: string[];
+  pet?: string | null;
   life_style?: string[];
+  hobbies?: Array<{ id: string; name: string; category: string }>;
   languages?: string[];
 }
 
@@ -24,6 +26,7 @@ export interface FindProfilesOptions {
   where?: {
     gender?: gender_type;
     city?: { contains: string; mode: "insensitive" };
+    ward?: { contains: string; mode: "insensitive" };
     is_verified?: boolean;
     birth_date?: {
       gte?: Date;
@@ -32,6 +35,7 @@ export interface FindProfilesOptions {
     OR?: Array<{
       display_name?: { contains: string; mode: "insensitive" };
       city?: { contains: string; mode: "insensitive" };
+      ward?: { contains: string; mode: "insensitive" };
       job_title?: { contains: string; mode: "insensitive" };
     }>;
   };
@@ -118,12 +122,14 @@ export class ProfilesRepository {
         job_title: data.job_title ?? null,
         height_cm: data.height_cm ?? null,
         city: data.city ?? null,
+        ward: data.ward ?? null,
         latitude: data.latitude !== undefined && data.latitude !== null ? data.latitude : null,
         longitude: data.longitude !== undefined && data.longitude !== null ? data.longitude : null,
         is_verified: data.is_verified ?? false,
         education: data.education ?? null,
-        pets: data.pets ?? [],
+        pet: data.pet ?? null,
         life_style: data.life_style ?? [],
+        hobbies: data.hobbies ?? [],
         languages: data.languages ?? [],
       },
     });
@@ -158,12 +164,14 @@ export class ProfilesRepository {
         job_title: data.job_title ?? null,
         height_cm: data.height_cm ?? null,
         city: data.city ?? null,
+        ward: data.ward ?? null,
         latitude: data.latitude !== undefined && data.latitude !== null ? data.latitude : null,
         longitude: data.longitude !== undefined && data.longitude !== null ? data.longitude : null,
         is_verified: data.is_verified ?? false,
         education: data.education ?? null,
-        pets: data.pets ?? [],
+        pet: data.pet ?? null,
         life_style: data.life_style ?? [],
+        hobbies: data.hobbies ?? [],
         languages: data.languages ?? [],
       },
       update: data,

@@ -24,6 +24,8 @@ const safeUserSelect = {
       gender: true,
       bio: true,
       city: true,
+      ward: true,
+      hobbies: true,
       job_title: true,
       is_verified: true,
     },

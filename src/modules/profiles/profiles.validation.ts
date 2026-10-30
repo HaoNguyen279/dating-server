@@ -52,6 +52,12 @@ function validateGeoPair<T extends { latitude?: number | null; longitude?: numbe
   }
 }
 
+const hobbySchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(100),
+  category: z.string().trim().min(1).max(100),
+});
+
 export const createProfileSchema = z
   .object({
     user_id: z.string().uuid("Invalid user ID format (UUID required)"),
@@ -66,12 +72,14 @@ export const createProfileSchema = z
     job_title: z.string().trim().max(100, "Job title cannot exceed 100 characters").optional().nullable(),
     height_cm: z.coerce.number().int().min(100, "Height must be at least 100cm").max(250, "Height cannot exceed 250cm").optional().nullable(),
     city: z.string().trim().max(100, "City name cannot exceed 100 characters").optional().nullable(),
+    ward: z.string().trim().max(100, "Ward name cannot exceed 100 characters").optional().nullable(),
     latitude: z.coerce.number().min(-90).max(90).optional().nullable(),
     longitude: z.coerce.number().min(-180).max(180).optional().nullable(),
     is_verified: z.boolean().optional().default(false),
     education: z.string().trim().max(100).optional().nullable(),
-    pets: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    pet: z.string().trim().min(1).max(50).optional().nullable(),
     life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    hobbies: z.array(hobbySchema).max(100).optional(),
     languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .superRefine(validateGeoPair);
@@ -90,12 +98,14 @@ export const updateProfileSchema = z
     job_title: z.string().trim().max(100, "Job title cannot exceed 100 characters").optional().nullable(),
     height_cm: z.coerce.number().int().min(100, "Height must be at least 100cm").max(250, "Height cannot exceed 250cm").optional().nullable(),
     city: z.string().trim().max(100, "City name cannot exceed 100 characters").optional().nullable(),
+    ward: z.string().trim().max(100, "Ward name cannot exceed 100 characters").optional().nullable(),
     latitude: z.coerce.number().min(-90).max(90).optional().nullable(),
     longitude: z.coerce.number().min(-180).max(180).optional().nullable(),
     is_verified: z.boolean().optional(),
     education: z.string().trim().max(100).optional().nullable(),
-    pets: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    pet: z.string().trim().min(1).max(50).optional().nullable(),
     life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+    hobbies: z.array(hobbySchema).max(100).optional(),
     languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
@@ -116,6 +126,7 @@ export const listProfilesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(10),
   gender: z.enum(["male", "female", "non_binary", "other"]).optional(),
   city: z.string().trim().optional(),
+  ward: z.string().trim().optional(),
   search: z.string().trim().optional(),
   is_verified: z
     .enum(["true", "false"])

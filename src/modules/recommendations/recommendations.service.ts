@@ -1,5 +1,20 @@
-import { RecommendationsRepository } from "./recommendations.repository.js";
+import { RecommendationsRepository, type RecommendationCandidate, type RecommendationViewerContext } from "./recommendations.repository.js";
 import type { RecommendationQuery } from "./recommendations.validation.js";
+import {
+  isMutuallyEligible,
+  haversineKm,
+  preferencesOrDefault,
+  validCoordinates,
+  type RecommendationPerson,
+} from "./recommendation-rules.js";
+import {
+  RANKING_VERSION,
+  scoreRecommendationPair,
+  type ScoringPerson,
+} from "./recommendation-scoring.js";
+
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const CURSOR_SEPARATOR = ":";
 
 export class RecommendationsHttpError extends Error {
   constructor(public readonly statusCode: number, message: string) {
@@ -9,9 +24,100 @@ export class RecommendationsHttpError extends Error {
 }
 
 export class RecommendationsService {
-  constructor(private readonly recommendationsRepo: RecommendationsRepository) {}
+  constructor(
+    private readonly recommendationsRepo: RecommendationsRepository,
+    private readonly clock: () => Date = () => new Date(),
+  ) {}
 
   async getRecommendations(userId: string, query: RecommendationQuery) {
+    const now = this.clock();
+    const viewer = await this.requireActiveViewer(userId);
+
+    if (query.cursor) {
+      const cursor = decodeCursor(query.cursor);
+      const session = await this.recommendationsRepo.findRankingSession(
+        cursor.sessionId,
+        userId,
+        now,
+      );
+      if (!session || cursor.position > session._count.items) {
+        throw new RecommendationsHttpError(400, "Invalid or expired recommendation cursor");
+      }
+      return this.readSnapshotPage(viewer, session, cursor.position, query.limit, now);
+    }
+
+    await this.recommendationsRepo.deleteExpiredSessions(now);
+    const candidates = await this.recommendationsRepo.findCandidates({ viewer, now });
+    const viewerPerson = toRecommendationPerson(viewer);
+    const scored = candidates
+      .filter((candidate) =>
+        isMutuallyEligible(viewerPerson, toRecommendationPerson(candidate), now),
+      )
+      .map((candidate) => {
+        const result = scoreRecommendationPair(
+          toScoringPerson(viewer),
+          toScoringPerson(candidate),
+          now,
+        );
+        return { candidate, ...result };
+      })
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        if (left.candidate.user_id < right.candidate.user_id) return -1;
+        if (left.candidate.user_id > right.candidate.user_id) return 1;
+        return 0;
+      });
+
+    if (!scored.length) {
+      return {
+        data: [],
+        pagination: { limit: query.limit, sessionId: null, nextCursor: null },
+      };
+    }
+
+    const session = await this.recommendationsRepo.createRankingSession(
+      userId,
+      RANKING_VERSION,
+      new Date(now.getTime() + SESSION_TTL_MS),
+      scored.map(({ candidate, score, missingFeatures }) => ({
+        candidateUserId: candidate.user_id,
+        score,
+        missingFeatures,
+      })),
+    );
+    const page = scored
+      .slice(0, query.limit)
+      .map(({ candidate }) => toPublicCandidate(candidate, viewer));
+    const nextPosition = page.length;
+
+    return {
+      data: page,
+      pagination: {
+        limit: query.limit,
+        sessionId: session.id,
+        nextCursor:
+          nextPosition < scored.length ? encodeCursor(session.id, nextPosition) : null,
+      },
+    };
+  }
+
+  async recordImpressions(
+    userId: string,
+    input: { sessionId: string; candidateUserIds: string[] },
+  ) {
+    const result = await this.recommendationsRepo.recordImpressions(
+      userId,
+      input.sessionId,
+      input.candidateUserIds,
+      this.clock(),
+    );
+    if (!result) {
+      throw new RecommendationsHttpError(404, "Recommendation session not found or expired");
+    }
+    return result;
+  }
+
+  private async requireActiveViewer(userId: string): Promise<RecommendationViewerContext> {
     const user = await this.recommendationsRepo.findDiscoveryContext(userId);
     if (!user || user.status !== "active") {
       throw new RecommendationsHttpError(404, "Active user not found");
@@ -19,38 +125,170 @@ export class RecommendationsService {
     if (!user.profiles) {
       throw new RecommendationsHttpError(400, "Create a profile before using discovery");
     }
+    return user;
+  }
 
-    const preferences = user.preferences;
-    const today = new Date();
-    const minAge = preferences?.age_min ?? 18;
-    const maxAge = preferences?.age_max ?? 99;
-    const maxBirthDate = yearsBefore(today, minAge);
-    const minBirthDate = yearsBefore(today, maxAge + 1);
-    const swipedUserIds = await this.recommendationsRepo.findSwipedUserIds(userId);
+  private async readSnapshotPage(
+    viewer: RecommendationViewerContext,
+    session: {
+      id: string;
+      ranking_version: string;
+      expires_at: Date;
+      _count: { items: number };
+    },
+    startPosition: number,
+    limit: number,
+    now: Date,
+  ) {
+    const data: RecommendationCandidate[] = [];
+    let nextPosition = startPosition;
+    const batchSize = Math.min(100, Math.max(20, limit * 2));
 
-    const data = await this.recommendationsRepo.findCandidates({
-      userId,
-      swipedUserIds,
-      minBirthDate,
-      maxBirthDate,
-      interestedIn: preferences?.interested_in ?? "everyone",
-      cursor: query.cursor,
-      limit: query.limit,
-    });
+    while (data.length < limit && nextPosition < session._count.items) {
+      const items = await this.recommendationsRepo.findSessionItems(
+        session.id,
+        nextPosition,
+        batchSize,
+      );
+      if (!items.length) {
+        nextPosition = session._count.items;
+        break;
+      }
 
-    const nextCursor = data.length === query.limit ? data[data.length - 1].user_id : null;
+      const eligible = await this.recommendationsRepo.findCandidates({
+        viewer,
+        now,
+        candidateUserIds: items.map((item) => item.candidate_user_id),
+      });
+      const eligibleByUserId = new Map(eligible.map((candidate) => [candidate.user_id, candidate]));
+      const viewerPerson = toRecommendationPerson(viewer);
+
+      for (const item of items) {
+        nextPosition = item.position + 1;
+        const candidate = eligibleByUserId.get(item.candidate_user_id);
+        if (
+          candidate &&
+          isMutuallyEligible(viewerPerson, toRecommendationPerson(candidate), now)
+        ) {
+          data.push(candidate);
+        }
+        if (data.length >= limit) break;
+      }
+    }
+
     return {
-      data,
+      data: data.map((candidate) => toPublicCandidate(candidate, viewer)),
       pagination: {
-        limit: query.limit,
-        nextCursor,
+        limit,
+        sessionId: session.id,
+        nextCursor:
+          nextPosition < session._count.items
+            ? encodeCursor(session.id, nextPosition)
+            : null,
       },
     };
   }
 }
 
-function yearsBefore(date: Date, years: number) {
-  const result = new Date(date);
-  result.setFullYear(result.getFullYear() - years);
-  return result;
+function toPublicCandidate(
+  candidate: RecommendationCandidate,
+  viewer: RecommendationViewerContext,
+) {
+  const { latitude: _latitude, longitude: _longitude, users, ...profile } = candidate;
+  const viewerCoordinates = coordinatesOf(
+    viewer.profiles!.latitude,
+    viewer.profiles!.longitude,
+  );
+  const candidateCoordinates = coordinatesOf(candidate.latitude, candidate.longitude);
+  const distanceKm =
+    viewerCoordinates && candidateCoordinates
+      ? Math.round(
+          haversineKm(
+            viewerCoordinates.latitude,
+            viewerCoordinates.longitude,
+            candidateCoordinates.latitude,
+            candidateCoordinates.longitude,
+          ) * 10,
+        ) / 10
+      : null;
+
+  return {
+    ...profile,
+    distance_km: distanceKm,
+    users: {
+      id: users.id,
+      photos: users.photos,
+    },
+  };
+}
+
+function decodeCursor(value: string): { sessionId: string; position: number } {
+  const [sessionId, rawPosition, ...extra] = value.split(CURSOR_SEPARATOR);
+  const position = Number(rawPosition);
+  if (
+    extra.length ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId) ||
+    !Number.isSafeInteger(position) ||
+    position < 0
+  ) {
+    throw new RecommendationsHttpError(400, "Invalid recommendation cursor");
+  }
+  return { sessionId, position };
+}
+
+function encodeCursor(sessionId: string, position: number) {
+  return `${sessionId}${CURSOR_SEPARATOR}${position}`;
+}
+
+function coordinatesOf(latitude: { toNumber(): number } | number | null, longitude: { toNumber(): number } | number | null) {
+  const lat = latitude === null ? null : typeof latitude === "number" ? latitude : latitude.toNumber();
+  const lng = longitude === null ? null : typeof longitude === "number" ? longitude : longitude.toNumber();
+  return lat !== null && lng !== null && validCoordinates(lat, lng)
+    ? { latitude: lat, longitude: lng }
+    : null;
+}
+
+function toRecommendationPerson(
+  value: RecommendationViewerContext | RecommendationCandidate,
+): RecommendationPerson {
+  const isViewer = "profiles" in value;
+  const profile = isViewer ? value.profiles : value;
+  const user = isViewer ? value : value.users;
+  const preferences = preferencesOrDefault(user.preferences);
+  return {
+    user_id: isViewer ? value.id : value.user_id,
+    status: user.status,
+    gender: profile!.gender,
+    birth_date: profile!.birth_date,
+    latitude:
+      profile!.latitude === null ? null : Number(profile!.latitude),
+    longitude:
+      profile!.longitude === null ? null : Number(profile!.longitude),
+    preferences,
+  };
+}
+
+function toScoringPerson(
+  value: RecommendationViewerContext | RecommendationCandidate,
+): ScoringPerson {
+  const isViewer = "profiles" in value;
+  const profile = isViewer ? value.profiles! : value;
+  const user = isViewer ? value : value.users;
+  return {
+    hobbies: profile.hobbies,
+    languages: profile.languages,
+    coordinates: coordinatesOf(profile.latitude, profile.longitude),
+    lastActiveAt: user.last_active_at,
+    bio: profile.bio,
+    jobTitle: profile.job_title,
+    city: profile.city,
+    ward: profile.ward,
+    photoCount: isViewer ? value.photos.length : value.users.photos.length,
+    preferences: user.preferences
+      ? {
+          max_distance_km: user.preferences.max_distance_km,
+          interested_languages: user.preferences.interested_languages,
+        }
+      : null,
+  };
 }

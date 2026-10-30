@@ -7,6 +7,7 @@ export type PreferenceData = {
   age_max?: number;
   max_distance_km?: number;
   show_me?: boolean;
+  interested_languages?: string[];
 };
 
 export type PreferenceWhere = Prisma.preferencesWhereInput;

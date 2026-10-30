@@ -93,11 +93,13 @@ model profiles {
   gender       gender_type
   bio          String?
   job_title    String?     @db.VarChar(100)
-  pets         String[]    @db.VarChar(50)
+  pet          String?     @db.VarChar(50)
   life_style   String[]    @db.VarChar(50)
+  hobbies      Json        @default("[]")
   education    String?     @db.VarChar(100)
   height_cm    Int?        @db.SmallInt
   city         String?     @db.VarChar(100)
+  ward         String?     @db.VarChar(100)
   latitude     Decimal?    @db.Decimal(9, 6)
   longitude    Decimal?    @db.Decimal(9, 6)
   is_verified  Boolean     @default(false)
@@ -107,6 +109,45 @@ model profiles {
   @@index([birth_date], map: "profiles_birth_idx")
   @@index([gender])
   @@index([latitude, longitude], map: "profiles_geo_idx")
+}
+
+model recommendation_sessions {
+  id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String                         @db.Uuid
+  ranking_version String                         @db.VarChar(32)
+  created_at      DateTime                       @default(now()) @db.Timestamptz(6)
+  expires_at      DateTime                       @db.Timestamptz(6)
+  users           users                          @relation("recommendation_session_owner", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  items           recommendation_session_items[]
+
+  @@index([user_id, expires_at], map: "recommendation_sessions_user_expiry_idx")
+  @@index([expires_at], map: "recommendation_sessions_expiry_idx")
+}
+
+model recommendation_session_items {
+  session_id       String                       @db.Uuid
+  position         Int
+  candidate_user_id String                      @db.Uuid
+  ranking_score    Float                        @db.DoublePrecision
+  missing_features Json                         @default("[]")
+  session          recommendation_sessions     @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  candidate        users                        @relation("recommendation_candidate_user", fields: [candidate_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  impression       recommendation_impressions?
+
+  @@id([session_id, position])
+  @@unique([session_id, candidate_user_id], map: "recommendation_session_candidate_uq")
+  @@index([candidate_user_id], map: "recommendation_session_candidate_idx")
+}
+
+model recommendation_impressions {
+  session_id       String                       @db.Uuid
+  candidate_user_id String                      @db.Uuid
+  position         Int
+  viewed_at        DateTime                     @default(now()) @db.Timestamptz(6)
+  session_item     recommendation_session_items @relation(fields: [session_id, candidate_user_id], references: [session_id, candidate_user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([session_id, candidate_user_id])
+  @@index([viewed_at], map: "recommendation_impressions_viewed_idx")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -142,6 +183,8 @@ model users {
   photos                          photos[]
   preferences                     preferences?
   profiles                        profiles?
+  recommendation_sessions         recommendation_sessions[] @relation("recommendation_session_owner")
+  recommendation_candidates       recommendation_session_items[] @relation("recommendation_candidate_user")
   swipes_swipes_swiped_idTousers  swipes[]     @relation("swipes_swiped_idTousers")
   swipes_swipes_swiper_idTousers  swipes[]     @relation("swipes_swiper_idTousers")
 

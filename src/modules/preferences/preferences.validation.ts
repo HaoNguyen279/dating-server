@@ -6,6 +6,7 @@ const preferenceFields = {
   age_max: z.coerce.number().int().min(18).max(120).optional(),
   max_distance_km: z.coerce.number().int().min(1).max(20_000).optional(),
   show_me: z.boolean().optional(),
+  interested_languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
 };
 
 function validateAgeRange<T extends { age_min?: number; age_max?: number }>(value: T, ctx: z.RefinementCtx) {
