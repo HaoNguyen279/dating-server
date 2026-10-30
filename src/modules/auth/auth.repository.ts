@@ -103,4 +103,18 @@ export class AuthRepository {
       select: authUserSelect,
     });
   }
+
+  async setProfileVerifiedByFirebaseUid(firebaseUid: string, isVerified: boolean) {
+    const user = await prisma.users.findUnique({
+      where: { firebase_uid: firebaseUid },
+      select: { id: true },
+    });
+    if (!user) return false;
+
+    const result = await prisma.profiles.updateMany({
+      where: { user_id: user.id },
+      data: { is_verified: isVerified },
+    });
+    return result.count > 0;
+  }
 }

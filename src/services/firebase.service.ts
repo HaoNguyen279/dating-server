@@ -66,6 +66,28 @@ export class FirebaseService {
     }
   }
 
+  async getUser(uid: string) {
+    if (!this.isConfigured()) {
+      throw new FirebaseError(500, "Firebase is not configured");
+    }
+    try {
+      return await this.auth!.getUser(uid);
+    } catch {
+      throw new FirebaseError(404, "Firebase user was not found");
+    }
+  }
+
+  async createCustomToken(uid: string): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new FirebaseError(500, "Firebase is not configured");
+    }
+    try {
+      return await this.auth!.createCustomToken(uid);
+    } catch {
+      throw new FirebaseError(500, "Could not create Firebase session");
+    }
+  }
+
   getFirestore() {
     if (!this.isConfigured()) {
       throw new FirebaseError(500, "Firebase is not configured");
