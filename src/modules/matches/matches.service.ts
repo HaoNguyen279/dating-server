@@ -1,6 +1,42 @@
 import type { match_status } from "../../generated/prisma/enums.js";
+import { haversineKm } from "../recommendations/recommendation-rules.js";
 import { MatchesRepository } from "./matches.repository.js";
 import type { ListMatchesQuery } from "./matches.validation.js";
+
+type ProfileCoordinates = {
+  latitude: unknown;
+  longitude: unknown;
+} | null | undefined;
+
+function distanceBetweenProfiles(
+  viewer: ProfileCoordinates,
+  partner: ProfileCoordinates,
+): number | null {
+  if (
+    !viewer || !partner ||
+    viewer.latitude === null || viewer.latitude === undefined ||
+    viewer.longitude === null || viewer.longitude === undefined ||
+    partner.latitude === null || partner.latitude === undefined ||
+    partner.longitude === null || partner.longitude === undefined
+  ) {
+    return null;
+  }
+
+  const viewerLatitude = Number(viewer.latitude);
+  const viewerLongitude = Number(viewer.longitude);
+  const partnerLatitude = Number(partner.latitude);
+  const partnerLongitude = Number(partner.longitude);
+  if (
+    !Number.isFinite(viewerLatitude) || !Number.isFinite(viewerLongitude) ||
+    !Number.isFinite(partnerLatitude) || !Number.isFinite(partnerLongitude)
+  ) {
+    return null;
+  }
+
+  return Math.round(
+    haversineKm(viewerLatitude, viewerLongitude, partnerLatitude, partnerLongitude) * 10,
+  ) / 10;
+}
 
 export class MatchesHttpError extends Error {
   constructor(public readonly statusCode: number, message: string) {
@@ -44,7 +80,21 @@ export class MatchesService {
     // Format convenient partner object for client
     const formattedMatches = matches.map((m) => {
       const isUser1 = m.user1_id === userId;
+      const viewer = isUser1 ? m.users_matches_user1_idTousers : m.users_matches_user2_idTousers;
       const partner = isUser1 ? m.users_matches_user2_idTousers : m.users_matches_user1_idTousers;
+      const partnerProfile = partner.profiles
+        ? {
+            display_name: partner.profiles.display_name,
+            birth_date: partner.profiles.birth_date,
+            gender: partner.profiles.gender,
+            bio: partner.profiles.bio,
+            city: partner.profiles.city,
+            ward: partner.profiles.ward,
+            hobbies: partner.profiles.hobbies,
+            job_title: partner.profiles.job_title,
+            is_verified: partner.profiles.is_verified,
+          }
+        : null;
       return {
         id: m.id,
         matched_at: m.matched_at,
@@ -53,8 +103,9 @@ export class MatchesService {
         partner: {
           id: partner.id,
           status: partner.status,
-          profile: partner.profiles,
+          profile: partnerProfile,
           photo: partner.photos,
+          distance_km: distanceBetweenProfiles(viewer.profiles, partner.profiles),
         },
         conversation: m.conversations,
       };

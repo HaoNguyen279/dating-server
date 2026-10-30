@@ -1,27 +1,40 @@
 import prisma from "../../lib/prisma.js";
 import type { match_status } from "../../generated/prisma/enums.js";
 
+const safeProfileSelect = {
+  display_name: true,
+  birth_date: true,
+  gender: true,
+  bio: true,
+  city: true,
+  ward: true,
+  hobbies: true,
+  job_title: true,
+  is_verified: true,
+};
+
 const safeUserSelect = {
   id: true,
   status: true,
   profiles: {
-    select: {
-      display_name: true,
-      birth_date: true,
-      gender: true,
-      bio: true,
-      city: true,
-      ward: true,
-      hobbies: true,
-      job_title: true,
-      is_verified: true,
-    },
+    select: safeProfileSelect,
   },
   photos: {
     select: {
       url: true,
       is_primary: true,
       position: true,
+    },
+  },
+};
+
+const matchListUserSelect = {
+  ...safeUserSelect,
+  profiles: {
+    select: {
+      ...safeProfileSelect,
+      latitude: true,
+      longitude: true,
     },
   },
 };
@@ -75,10 +88,10 @@ export class MatchesRepository {
           },
         },
         users_matches_user1_idTousers: {
-          select: safeUserSelect,
+          select: matchListUserSelect,
         },
         users_matches_user2_idTousers: {
-          select: safeUserSelect,
+          select: matchListUserSelect,
         },
       },
     });
