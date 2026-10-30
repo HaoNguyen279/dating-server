@@ -1,5 +1,6 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth, DecodedIdToken } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 
 export class FirebaseError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -63,5 +64,12 @@ export class FirebaseService {
       }
       throw error;
     }
+  }
+
+  getFirestore() {
+    if (!this.isConfigured()) {
+      throw new FirebaseError(500, "Firebase is not configured");
+    }
+    return getFirestore();
   }
 }
