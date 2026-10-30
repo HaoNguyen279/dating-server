@@ -1,56 +1,125 @@
 import prisma from "../../lib/prisma.js";
 
-export class PhotosRepository {
-  async getNextPosition(userId: string) {
-    const user = await prisma.users.findUnique({
-      where: { id: userId },
-      select: { id: true },
-    });
-    if (!user) return null;
+export class PhotoLimitError extends Error {
+  constructor() {
+    super("A user can upload at most 9 photos");
+    this.name = "PhotoLimitError";
+  }
+}
 
-    const latestPhoto = await prisma.photos.findFirst({
+export class PhotoOrderError extends Error {
+  constructor() {
+    super("Photo order must contain every photo owned by the user exactly once");
+    this.name = "PhotoOrderError";
+  }
+}
+
+export class PhotosRepository {
+  listForUser(userId: string) {
+    return prisma.photos.findMany({
       where: { user_id: userId },
-      orderBy: { position: "desc" },
-      select: { position: true },
+      orderBy: [{ position: "asc" }, { created_at: "asc" }],
     });
-    return (latestPhoto?.position ?? -1) + 1;
   }
 
-  async createForUser(userId: string, url: string) {
+  getOwnedPhoto(userId: string, photoId: string) {
+    return prisma.photos.findFirst({
+      where: { id: photoId, user_id: userId },
+    });
+  }
+
+  async createForUser(userId: string, url: string, cloudinaryPublicId: string) {
     return prisma.$transaction(async (tx) => {
       const user = await tx.users.findUnique({
         where: { id: userId },
         select: { id: true },
       });
-
       if (!user) return null;
 
-      const latestPhoto = await tx.photos.findFirst({
-        where: { user_id: userId },
-        orderBy: { position: "desc" },
-        select: { position: true },
-      });
+      const [count, latestPhoto] = await Promise.all([
+        tx.photos.count({ where: { user_id: userId } }),
+        tx.photos.findFirst({
+          where: { user_id: userId },
+          orderBy: { position: "desc" },
+          select: { position: true },
+        }),
+      ]);
+      if (count >= 9) throw new PhotoLimitError();
+
       const position = (latestPhoto?.position ?? -1) + 1;
-
-      if (position > 8) {
-        throw new PhotoLimitError();
-      }
-
       return tx.photos.create({
         data: {
           user_id: userId,
           url,
+          cloudinary_public_id: cloudinaryPublicId,
           position,
-          is_primary: position === 0,
+          is_primary: count === 0,
         },
       });
     });
   }
-}
 
-export class PhotoLimitError extends Error {
-  constructor() {
-    super("A user can upload at most 9 photos");
-    this.name = "PhotoLimitError";
+  async setOrder(userId: string, orderedPhotoIds: string[]) {
+    return prisma.$transaction(async (tx) => {
+      const photos = await tx.photos.findMany({
+        where: { user_id: userId },
+        orderBy: { position: "asc" },
+        select: { id: true },
+      });
+      const currentIds = new Set(photos.map((photo) => photo.id));
+      if (
+        orderedPhotoIds.length !== photos.length ||
+        new Set(orderedPhotoIds).size !== orderedPhotoIds.length ||
+        orderedPhotoIds.some((id) => !currentIds.has(id))
+      ) {
+        throw new PhotoOrderError();
+      }
+
+      await tx.photos.updateMany({
+        where: { user_id: userId },
+        data: { is_primary: false },
+      });
+      // The position constraint is deferrable, so let the transaction validate
+      // the unique (user_id, position) key after all rows have their new slots.
+      await tx.$executeRaw`SET CONSTRAINTS "photos_user_position_uq" DEFERRED`;
+      for (const [position, id] of orderedPhotoIds.entries()) {
+        await tx.photos.update({
+          where: { id },
+          data: { position, is_primary: position === 0 },
+        });
+      }
+
+      return tx.photos.findMany({
+        where: { user_id: userId },
+        orderBy: { position: "asc" },
+      });
+    });
+  }
+
+  async deleteForUser(userId: string, photoId: string) {
+    return prisma.$transaction(async (tx) => {
+      const photos = await tx.photos.findMany({
+        where: { user_id: userId },
+        orderBy: { position: "asc" },
+      });
+      const deletedPhoto = photos.find((photo) => photo.id === photoId);
+      if (!deletedPhoto) return null;
+
+      const remaining = photos.filter((photo) => photo.id !== photoId);
+      await tx.photos.updateMany({
+        where: { user_id: userId },
+        data: { is_primary: false },
+      });
+      await tx.$executeRaw`SET CONSTRAINTS "photos_user_position_uq" DEFERRED`;
+      await tx.photos.delete({ where: { id: photoId } });
+      for (const [position, photo] of remaining.entries()) {
+        await tx.photos.update({
+          where: { id: photo.id },
+          data: { position, is_primary: position === 0 },
+        });
+      }
+
+      return deletedPhoto;
+    });
   }
 }

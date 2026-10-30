@@ -1,69 +1,183 @@
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "node:stream";
-import { PhotoLimitError, PhotosRepository } from "./photos.repository.js";
+import {
+  PhotoLimitError,
+  PhotosRepository,
+} from "./photos.repository.js";
 
-export class PhotoUploadError extends Error {
-  constructor(public statusCode: number, message: string) {
+export class PhotoManagementError extends Error {
+  constructor(
+    public statusCode: number,
+    message: string,
+  ) {
     super(message);
-    this.name = "PhotoUploadError";
+    this.name = "PhotoManagementError";
   }
 }
 
 export class PhotosService {
   constructor(private readonly photosRepository: PhotosRepository) {}
 
+  async list(userId: string) {
+    return this.photosRepository.listForUser(userId);
+  }
+
   async upload(userId: string, file: Express.Multer.File) {
-    const position = await this.photosRepository.getNextPosition(userId);
-    if (position === null) {
-      throw new PhotoUploadError(404, "User not found");
-    }
-    if (position > 8) {
-      throw new PhotoUploadError(409, "A user can upload at most 9 photos");
-    }
+    const cloudinaryConfig = this.getCloudinaryConfig();
+    cloudinary.config(cloudinaryConfig);
 
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
-    const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
-    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET?.trim();
-
-    if (!cloudName || !apiKey || !uploadPreset) {
-      throw new PhotoUploadError(503, "Cloudinary upload is not configured");
-    }
-
-    cloudinary.config({ cloud_name: cloudName, api_key: apiKey });
-
-    let uploadResult: { secure_url: string };
+    let uploadResult: { secure_url: string; public_id: string };
     try {
       uploadResult = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
           {
-            upload_preset: uploadPreset,
             folder: "dating-app/users",
             resource_type: "image",
+            allowed_formats: ["jpg", "jpeg", "png", "webp", "avif", "heic", "heif"],
           },
           (error, result) => {
             if (error) return reject(error);
-            if (!result?.secure_url) return reject(new Error("Cloudinary returned no image URL"));
-            resolve(result as { secure_url: string });
-          }
+            if (!result?.secure_url || !result.public_id) {
+              return reject(new Error("Cloudinary returned incomplete image metadata"));
+            }
+            resolve(result as { secure_url: string; public_id: string });
+          },
         );
 
         Readable.from(file.buffer).pipe(uploadStream);
       });
     } catch (error) {
       console.error("Cloudinary photo upload failed:", error);
-      throw new PhotoUploadError(502, "Unable to upload photo to Cloudinary");
+      throw new PhotoManagementError(502, "Unable to upload photo to Cloudinary");
     }
 
     try {
-      const photo = await this.photosRepository.createForUser(userId, uploadResult.secure_url);
+      const photo = await this.photosRepository.createForUser(
+        userId,
+        uploadResult.secure_url,
+        uploadResult.public_id,
+      );
       if (!photo) {
-        throw new PhotoUploadError(404, "User not found");
+        await this.destroyUploadedAsset(uploadResult.public_id);
+        throw new PhotoManagementError(404, "User not found");
       }
       return photo;
     } catch (error) {
-      if (error instanceof PhotoLimitError || error instanceof PhotoUploadError) throw error;
-      console.error("Saving uploaded photo URL failed:", error);
-      throw new PhotoUploadError(500, "Photo was uploaded but its URL could not be saved");
+      if (error instanceof PhotoLimitError) {
+        await this.destroyUploadedAsset(uploadResult.public_id);
+        throw new PhotoManagementError(409, error.message);
+      }
+      if (error instanceof PhotoManagementError) throw error;
+
+      await this.destroyUploadedAsset(uploadResult.public_id);
+      console.error("Saving uploaded photo metadata failed:", error);
+      throw new PhotoManagementError(500, "Photo upload could not be saved");
+    }
+  }
+
+  async setOrder(userId: string, orderedPhotoIds: string[]) {
+    return this.photosRepository.setOrder(userId, orderedPhotoIds);
+  }
+
+  async setPrimary(userId: string, photoId: string) {
+    const photos = await this.photosRepository.listForUser(userId);
+    if (!photos.some((photo) => photo.id === photoId)) {
+      throw new PhotoManagementError(404, "Photo not found");
+    }
+    return this.photosRepository.setOrder(userId, [
+      photoId,
+      ...photos.filter((photo) => photo.id !== photoId).map((photo) => photo.id),
+    ]);
+  }
+
+  async delete(userId: string, photoId: string) {
+    const photo = await this.photosRepository.getOwnedPhoto(userId, photoId);
+    if (!photo) throw new PhotoManagementError(404, "Photo not found");
+
+    const cloudinaryPublicId = photo.cloudinary_public_id ?? this.publicIdFromLegacyUrl(photo.url);
+    let cloudinaryDeleted = false;
+    if (cloudinaryPublicId) {
+      cloudinary.config(this.getCloudinaryConfig());
+      try {
+        const result = await cloudinary.uploader.destroy(cloudinaryPublicId, {
+          resource_type: "image",
+          invalidate: true,
+        });
+        if (result.result !== "ok" && result.result !== "not found") {
+          throw new Error(`Unexpected Cloudinary destroy result: ${result.result}`);
+        }
+        cloudinaryDeleted = result.result === "ok";
+      } catch (error) {
+        console.error("Cloudinary photo deletion failed:", error);
+        throw new PhotoManagementError(502, "Unable to delete photo from Cloudinary");
+      }
+    }
+
+    await this.photosRepository.deleteForUser(userId, photoId);
+    return {
+      id: photo.id,
+      cloudinaryDeleted,
+      legacyAsset: !cloudinaryPublicId,
+    };
+  }
+
+  private publicIdFromLegacyUrl(url: string) {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+    if (!cloudName) return null;
+
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== "res.cloudinary.com") return null;
+
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const uploadIndex = parts.indexOf("upload");
+      if (
+        parts[0] !== cloudName ||
+        uploadIndex < 2 ||
+        parts[uploadIndex - 1] !== "image"
+      ) {
+        return null;
+      }
+
+      const assetParts = parts.slice(uploadIndex + 1);
+      const versionIndex = assetParts.findIndex((part) => /^v\d+$/.test(part));
+      const publicIdParts = versionIndex >= 0
+        ? assetParts.slice(versionIndex + 1)
+        : assetParts;
+      if (publicIdParts.length === 0) return null;
+
+      const lastPartIndex = publicIdParts.length - 1;
+      publicIdParts[lastPartIndex] = publicIdParts[lastPartIndex].replace(/\.[^.]+$/, "");
+      const publicId = publicIdParts.join("/");
+      return publicId || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private getCloudinaryConfig() {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+    const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
+    const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new PhotoManagementError(503, "Cloudinary server credentials are not configured");
+    }
+
+    return {
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
+    };
+  }
+
+  private async destroyUploadedAsset(publicId: string) {
+    try {
+      cloudinary.config(this.getCloudinaryConfig());
+      await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
+    } catch (error) {
+      console.error("Cloudinary cleanup after failed photo upload failed:", error);
     }
   }
 }
