@@ -12,6 +12,10 @@ export const firebaseSignInSchema = z.object({
 
 export type FirebaseSignInInput = z.infer<typeof firebaseSignInSchema>;
 
+export const verifyPhoneStatusSchema = z.object({
+  idToken: z.string().trim().min(1, "idToken is required"),
+});
+
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(100);
 const emailSchema = z.string().trim().email().max(255);
 const phoneSchema = z.string().trim().regex(/^\+?[0-9]{8,15}$/).max(20);

@@ -198,4 +198,45 @@ export class AuthService {
       };
     }
   }
+
+  async syncPhoneVerification(idToken: string) {
+    let decodedToken;
+    try {
+      decodedToken = await this.firebaseService.verifyIdToken(idToken);
+    } catch {
+      throw new AuthError(401, "Invalid or expired Firebase ID token");
+    }
+
+    const firebaseUser = await this.firebaseService.getUser(decodedToken.uid);
+    if (!firebaseUser.phoneNumber) {
+      throw new AuthError(400, "A verified phone number is not linked to this Firebase account");
+    }
+
+    const profileUpdated = await this.authRepository.setProfileVerifiedByFirebaseUid(
+      decodedToken.uid,
+      true,
+    );
+    if (!profileUpdated) {
+      throw new AuthError(404, "Profile not found for this Firebase account");
+    }
+
+    return { is_verified: true };
+  }
+
+  async createNativePhoneSession(idToken: string) {
+    let decodedToken;
+    try {
+      decodedToken = await this.firebaseService.verifyIdToken(idToken);
+    } catch {
+      throw new AuthError(401, "Invalid or expired Firebase ID token");
+    }
+
+    const account = await this.authRepository.findByFirebaseUid(decodedToken.uid);
+    if (!account || account.status !== "active") {
+      throw new AuthError(403, "A signed-in Firebase account is required");
+    }
+
+    const customToken = await this.firebaseService.createCustomToken(decodedToken.uid);
+    return { customToken };
+  }
 }

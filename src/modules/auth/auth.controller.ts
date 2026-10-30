@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { AuthError, AuthService } from "./auth.service.js";
-import { googleSignInSchema, firebaseSignInSchema, loginSchema, registerSchema } from "./auth.validation.js";
+import { googleSignInSchema, firebaseSignInSchema, loginSchema, registerSchema, verifyPhoneStatusSchema } from "./auth.validation.js";
 
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -90,6 +90,37 @@ export class AuthController {
       });
     } catch (error) {
       return this.handleAuthError(res, error, "firebaseSignIn");
+    }
+  }
+
+  async syncPhoneVerification(req: Request, res: Response) {
+    const result = verifyPhoneStatusSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "A Firebase ID token is required",
+        errors: result.error.flatten().fieldErrors,
+      });
+    }
+
+    try {
+      const data = await this.authService.syncPhoneVerification(result.data.idToken);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      return this.handleAuthError(res, error, "syncPhoneVerification");
+    }
+  }
+
+  async createNativePhoneSession(req: Request, res: Response) {
+    const result = verifyPhoneStatusSchema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: "A Firebase ID token is required" });
+    }
+    try {
+      const data = await this.authService.createNativePhoneSession(result.data.idToken);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      return this.handleAuthError(res, error, "createNativePhoneSession");
     }
   }
 }
