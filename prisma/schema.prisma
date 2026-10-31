@@ -10,12 +10,11 @@ datasource db {
 
 /// This model contains an index with non-default null sort order and requires additional setup for migrations. Visit https://pris.ly/d/default-index-null-ordering for more info.
 model conversations {
-  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  match_id        String     @unique @db.Uuid
-  last_message_at DateTime?  @db.Timestamptz(6)
-  created_at      DateTime   @default(now()) @db.Timestamptz(6)
-  matches         matches    @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  messages        messages[]
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  match_id        String    @unique @db.Uuid
+  last_message_at DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  matches         matches   @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([last_message_at(sort: Desc)], map: "conversations_last_message_idx")
 }
@@ -35,24 +34,6 @@ model matches {
   @@unique([user1_id, user2_id], map: "matches_pair_uq")
   @@index([status])
   @@index([user2_id], map: "matches_user2_idx")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model messages {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  conversation_id String        @db.Uuid
-  sender_id       String        @db.Uuid
-  content         String
-  message_type    message_type  @default(text)
-  is_read         Boolean       @default(false)
-  read_at         DateTime?     @db.Timestamptz(6)
-  created_at      DateTime      @default(now()) @db.Timestamptz(6)
-  conversations   conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users           users         @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([conversation_id, created_at(sort: Desc)], map: "messages_conv_created_idx")
-  @@index([sender_id], map: "messages_sender_idx")
-  @@index([conversation_id], map: "messages_unread_idx", where: raw("(NOT is_read)"))
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -229,7 +210,6 @@ model users {
   updated_at                      DateTime                       @default(now()) @db.Timestamptz(6)
   matches_matches_user1_idTousers matches[]                      @relation("matches_user1_idTousers")
   matches_matches_user2_idTousers matches[]                      @relation("matches_user2_idTousers")
-  messages                        messages[]
   photos                          photos[]
   preferences                     preferences?
   profiles                        profiles?
@@ -259,12 +239,6 @@ enum interested_type {
 enum match_status {
   active
   unmatched
-}
-
-enum message_type {
-  text
-  image
-  gif
 }
 
 enum swipe_action {

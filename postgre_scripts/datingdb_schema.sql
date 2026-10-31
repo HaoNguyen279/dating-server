@@ -2,7 +2,7 @@
 -- DATING APP - PostgreSQL schema (v2: multi-provider login)
 -- Database : datingdb
 -- Tables   : users, profiles, photos, preferences, swipes, matches,
---            conversations, messages,
+--            conversations,
 --            auth_identities, phone_otps, user_sessions, login_events
 -- Login    : Google Sign In, Facebook, Số điện thoại (OTP)
 -- Yêu cầu  : PostgreSQL 13+ (DROP DATABASE ... FORCE, gen_random_uuid)
@@ -36,7 +36,6 @@ CREATE TYPE gender_type     AS ENUM ('male', 'female', 'non_binary', 'other');
 CREATE TYPE interested_type AS ENUM ('male', 'female', 'everyone');
 CREATE TYPE swipe_action    AS ENUM ('like', 'pass', 'super_like');
 CREATE TYPE match_status    AS ENUM ('active', 'unmatched');
-CREATE TYPE message_type    AS ENUM ('text', 'image', 'gif');
 
 -- Enum cho phần đăng nhập
 -- Thêm provider mới sau này: ALTER TYPE auth_provider ADD VALUE 'apple';
@@ -268,31 +267,6 @@ CREATE TABLE conversations (
 CREATE INDEX conversations_last_message_idx ON conversations (last_message_at DESC NULLS LAST);
 
 -- ---------------------------------------------------------------------
--- 8. MESSAGES
--- ---------------------------------------------------------------------
-CREATE TABLE messages (
-    id               uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id  uuid          NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
-    sender_id        uuid          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    content          text          NOT NULL,
-    message_type     message_type  NOT NULL DEFAULT 'text',
-    is_read          boolean       NOT NULL DEFAULT false,
-    read_at          timestamptz,
-    created_at       timestamptz   NOT NULL DEFAULT now(),
-
-    CONSTRAINT messages_content_not_blank CHECK (length(btrim(content)) > 0),
-    CONSTRAINT messages_text_len CHECK (message_type <> 'text' OR length(content) <= 2000),
-    -- is_read và read_at luôn đồng bộ
-    CONSTRAINT messages_read_consistent CHECK (is_read = (read_at IS NOT NULL))
-);
-
--- Tải lịch sử chat theo thời gian
-CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC);
-CREATE INDEX messages_sender_idx       ON messages (sender_id);
--- Đếm tin chưa đọc nhanh
-CREATE INDEX messages_unread_idx ON messages (conversation_id) WHERE NOT is_read;
-
--- ---------------------------------------------------------------------
 -- 9. AUTH_IDENTITIES (1 - N với users)  *** MỚI ***
 -- Mỗi dòng = một cách đăng nhập đã liên kết với tài khoản.
 --   google   : provider_user_id = "sub" trong ID token của Google
@@ -429,52 +403,7 @@ CREATE INDEX login_events_identifier_idx ON login_events (identifier, created_at
 -- 13. TRIGGERS NGHIỆP VỤ
 -- ---------------------------------------------------------------------
 
--- 13.1 Người gửi phải là một trong hai người của match, và match phải còn active
-CREATE OR REPLACE FUNCTION validate_message_sender()
-RETURNS trigger AS $$
-DECLARE
-    m matches%ROWTYPE;
-BEGIN
-    SELECT mt.* INTO m
-    FROM conversations c
-    JOIN matches mt ON mt.id = c.match_id
-    WHERE c.id = NEW.conversation_id;
-
-    IF NEW.sender_id NOT IN (m.user1_id, m.user2_id) THEN
-        RAISE EXCEPTION 'Sender % is not a participant of conversation %',
-            NEW.sender_id, NEW.conversation_id
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    IF m.status <> 'active' THEN
-        RAISE EXCEPTION 'Cannot send message: match is unmatched'
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_messages_validate_sender
-    BEFORE INSERT ON messages
-    FOR EACH ROW EXECUTE FUNCTION validate_message_sender();
-
--- 13.2 Cập nhật conversations.last_message_at khi có tin nhắn mới
-CREATE OR REPLACE FUNCTION touch_conversation_last_message()
-RETURNS trigger AS $$
-BEGIN
-    UPDATE conversations
-       SET last_message_at = NEW.created_at
-     WHERE id = NEW.conversation_id;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_messages_touch_conversation
-    AFTER INSERT ON messages
-    FOR EACH ROW EXECUTE FUNCTION touch_conversation_last_message();
-
--- 13.3 Tự động tạo match + conversation khi hai người like nhau
+-- Tự động tạo match + conversation khi hai người like nhau
 CREATE OR REPLACE FUNCTION create_match_on_mutual_like()
 RETURNS trigger AS $$
 DECLARE
