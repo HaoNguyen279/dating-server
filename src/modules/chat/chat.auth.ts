@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import prisma from "../../lib/prisma.js";
+import { getCachedFirebaseUser } from "../../middlewares/authenticate.js";
 import { FirebaseService } from "../../services/firebase.service.js";
 
 const firebaseService = new FirebaseService();
@@ -19,10 +19,7 @@ export const requireChatAuth: RequestHandler = async (_req, res, next) => {
     }
 
     const decoded = await firebaseService.verifyIdToken(token);
-    const user = await prisma.users.findUnique({
-      where: { firebase_uid: decoded.uid },
-      select: { id: true, firebase_uid: true, status: true },
-    });
+    const user = await getCachedFirebaseUser(decoded.uid);
 
     if (!user || !user.firebase_uid) {
       res.status(401).json({ success: false, message: "User is not linked to Firebase" });

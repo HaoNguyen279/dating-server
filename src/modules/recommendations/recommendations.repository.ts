@@ -50,6 +50,7 @@ const candidateSelect = {
   display_name: true,
   birth_date: true,
   gender: true,
+  relationship_intention: true,
   bio: true,
   job_title: true,
   pet: true,
@@ -96,6 +97,8 @@ export class RecommendationsRepository {
     viewer: RecommendationViewerContext;
     now: Date;
     candidateUserIds?: string[];
+    discoveryGroupId?: string | null;
+    relationshipIntention?: string | null;
   }): Promise<RecommendationCandidate[]> {
     const viewerProfile = options.viewer.profiles;
     if (!viewerProfile) return [];
@@ -170,6 +173,15 @@ export class RecommendationsRepository {
             : []),
         ],
       },
+      ...(options.discoveryGroupId
+        ? [
+            {
+              discovery_group_members: {
+                some: { group_id: options.discoveryGroupId },
+              },
+            } satisfies Prisma.usersWhereInput,
+          ]
+        : []),
     ];
 
     const profileConditions: Prisma.profilesWhereInput[] = [
@@ -185,6 +197,9 @@ export class RecommendationsRepository {
 
     return prisma.profiles.findMany({
       where: {
+        ...(options.relationshipIntention
+          ? { relationship_intention: options.relationshipIntention }
+          : {}),
         user_id: {
           not: options.viewer.id,
           ...(options.candidateUserIds ? { in: options.candidateUserIds } : {}),
@@ -211,10 +226,20 @@ export class RecommendationsRepository {
     rankingVersion: string,
     expiresAt: Date,
     items: RankingSnapshotItemInput[],
+    scope: {
+      discoveryGroupId?: string | null;
+      relationshipIntention?: string | null;
+    } = {},
   ) {
     return prisma.$transaction(async (tx) => {
       const session = await tx.recommendation_sessions.create({
-        data: { user_id: userId, ranking_version: rankingVersion, expires_at: expiresAt },
+        data: {
+          user_id: userId,
+          discovery_group_id: scope.discoveryGroupId ?? null,
+          relationship_intention_filter: scope.relationshipIntention ?? null,
+          ranking_version: rankingVersion,
+          expires_at: expiresAt,
+        },
         select: { id: true },
       });
       if (items.length) {
@@ -237,10 +262,19 @@ export class RecommendationsRepository {
       where: { id: sessionId, user_id: userId, expires_at: { gt: now } },
       select: {
         id: true,
+        discovery_group_id: true,
+        relationship_intention_filter: true,
         ranking_version: true,
         expires_at: true,
         _count: { select: { items: true } },
       },
+    });
+  }
+
+  findActiveGroupBySlug(slug: string) {
+    return prisma.discovery_groups.findFirst({
+      where: { slug, is_active: true },
+      select: { id: true, slug: true, name: true },
     });
   }
 

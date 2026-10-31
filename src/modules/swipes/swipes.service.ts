@@ -1,4 +1,6 @@
 import type { swipe_action } from "../../generated/prisma/enums.js";
+import { invalidateUserMatchesCache } from "../matches/matches.service.js";
+import { invalidateUserRecommendationsCache } from "../recommendations/recommendations.service.js";
 import { SwipesRepository, type SwipeResult } from "./swipes.repository.js";
 import type { CreateSwipeInput, ListSwipesQuery } from "./swipes.validation.js";
 
@@ -31,11 +33,21 @@ export class SwipesService {
       throw new SwipesHttpError(409, "You have already swiped on this user");
     }
 
-    return this.swipesRepo.createSwipeWithMatchCheck(
+    const result = await this.swipesRepo.createSwipeWithMatchCheck(
       input.swiper_id,
       input.swiped_id,
       input.action as swipe_action
     );
+    const invalidations = [invalidateUserRecommendationsCache(input.swiper_id)];
+    if (result.isMatch) {
+      invalidations.push(
+        invalidateUserRecommendationsCache(input.swiped_id),
+        invalidateUserMatchesCache(input.swiper_id),
+        invalidateUserMatchesCache(input.swiped_id),
+      );
+    }
+    await Promise.all(invalidations);
+    return result;
   }
 
   async getSwipesByUserId(userId: string, query?: Partial<ListSwipesQuery>) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RELATIONSHIP_INTENTIONS } from "./relationship-intention.js";
 
 function calculateAge(birthDate: Date): number {
   const today = new Date();
@@ -79,6 +80,7 @@ export const createProfileSchema = z
     pet: z.string().trim().min(1).max(50).optional().nullable(),
     life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
     hobbies: z.array(hobbySchema).max(100).optional(),
+    relationship_intention: z.enum(RELATIONSHIP_INTENTIONS).optional().nullable(),
     languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .superRefine(validateGeoPair);
@@ -104,6 +106,7 @@ export const updateProfileSchema = z
     pet: z.string().trim().min(1).max(50).optional().nullable(),
     life_style: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
     hobbies: z.array(hobbySchema).max(100).optional(),
+    relationship_intention: z.enum(RELATIONSHIP_INTENTIONS).optional().nullable(),
     languages: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
@@ -118,6 +121,12 @@ export const profileIdParamSchema = z.object({
 export const profileUserIdParamSchema = z.object({
   userId: z.string().uuid("Invalid user ID format (UUID required)"),
 });
+
+export const relationshipIntentionUpdateSchema = z
+  .object({
+    relationship_intention: z.enum(RELATIONSHIP_INTENTIONS).nullable(),
+  })
+  .strict();
 
 export const listProfilesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),

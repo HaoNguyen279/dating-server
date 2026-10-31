@@ -1,5 +1,6 @@
 import prisma from "../../lib/prisma.js";
 import type { gender_type } from "../../generated/prisma/enums.js";
+import type { RelationshipIntention } from "./relationship-intention.js";
 
 export interface ProfileData {
   display_name?: string;
@@ -17,6 +18,7 @@ export interface ProfileData {
   pet?: string | null;
   life_style?: string[];
   hobbies?: Array<{ id: string; name: string; category: string }>;
+  relationship_intention?: RelationshipIntention | null;
   languages?: string[];
 }
 
@@ -130,6 +132,7 @@ export class ProfilesRepository {
         pet: data.pet ?? null,
         life_style: data.life_style ?? [],
         hobbies: data.hobbies ?? [],
+        relationship_intention: data.relationship_intention ?? null,
         languages: data.languages ?? [],
       },
     });
@@ -172,6 +175,7 @@ export class ProfilesRepository {
         pet: data.pet ?? null,
         life_style: data.life_style ?? [],
         hobbies: data.hobbies ?? [],
+        relationship_intention: data.relationship_intention ?? null,
         languages: data.languages ?? [],
       },
       update: data,

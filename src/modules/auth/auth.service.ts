@@ -2,6 +2,7 @@ import { OAuth2Client } from "google-auth-library";
 import { hashPassword, verifyPassword } from "../users/users.service.js";
 import { AuthRepository } from "./auth.repository.js";
 import { FirebaseService } from "../../services/firebase.service.js";
+import { invalidateAuthUserCache } from "../../middlewares/authenticate.js";
 import type { LoginInput, RegisterInput } from "./auth.validation.js";
 
 export class AuthError extends Error {
@@ -30,6 +31,7 @@ export class AuthService {
 
     try {
       const user = await this.authRepository.createPasswordUser(email, phone, hashPassword(input.password));
+      await invalidateAuthUserCache();
       return { user };
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
@@ -97,6 +99,7 @@ export class AuthService {
 
     try {
       const user = await this.authRepository.createGoogleUser(googleSub, email);
+      await invalidateAuthUserCache();
       return { user, isNewUser: true };
     } catch (error) {
       // A concurrent first sign-in may have inserted this Google sub after our lookup.
@@ -107,6 +110,7 @@ export class AuthService {
       if (!userCreatedByConcurrentRequest && email && this.isUniqueConstraintError(error)) {
         try {
           const user = await this.authRepository.createGoogleUser(googleSub, null);
+          await invalidateAuthUserCache();
           return { user, isNewUser: true };
         } catch (retryError) {
           userCreatedByConcurrentRequest = await this.authRepository.findByGoogleSub(googleSub);
@@ -167,6 +171,7 @@ export class AuthService {
 
     try {
       const user = await this.authRepository.createFirebaseUser(firebaseUid, email);
+      await invalidateAuthUserCache();
       return { user, isNewUser: true };
     } catch (error) {
       // A concurrent first sign-in may have inserted this Firebase UID after our lookup.
@@ -177,6 +182,7 @@ export class AuthService {
       if (!userCreatedByConcurrentRequest && email && this.isUniqueConstraintError(error)) {
         try {
           const user = await this.authRepository.createFirebaseUser(firebaseUid, null);
+          await invalidateAuthUserCache();
           return { user, isNewUser: true };
         } catch (retryError) {
           userCreatedByConcurrentRequest = await this.authRepository.findByFirebaseUid(firebaseUid);

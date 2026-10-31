@@ -7,6 +7,8 @@ import type {
   CheckAvailabilityQuery,
 } from "./users.validation.js";
 import type { user_status } from "../../generated/prisma/enums.js";
+import { invalidateAuthUserCache } from "../../middlewares/authenticate.js";
+import { invalidateUserRecommendationsCache } from "../recommendations/recommendations.service.js";
 
 export class HttpError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -188,17 +190,29 @@ export class UsersService {
       updateData.password_hash = hashPassword(input.password);
     }
 
-    return this.usersRepo.update(id, updateData);
+    const user = await this.usersRepo.update(id, updateData);
+    await Promise.all([
+      invalidateAuthUserCache(),
+      invalidateUserRecommendationsCache(id),
+    ]);
+    return user;
   }
 
   async updateStatus(id: string, status: user_status): Promise<SafeUser> {
     await this.getUserById(id);
-    return this.usersRepo.updateStatus(id, status);
+    const user = await this.usersRepo.updateStatus(id, status);
+    await Promise.all([
+      invalidateAuthUserCache(),
+      invalidateUserRecommendationsCache(id),
+    ]);
+    return user;
   }
 
   async recordActivity(id: string): Promise<SafeUser> {
     await this.getUserById(id);
-    return this.usersRepo.updateLastActive(id);
+    const user = await this.usersRepo.updateLastActive(id);
+    await invalidateAuthUserCache();
+    return user;
   }
 
   async deleteUser(id: string, hard = false): Promise<{ message: string; deleted: boolean; type: "soft" | "hard" }> {
@@ -206,6 +220,10 @@ export class UsersService {
 
     if (hard) {
       await this.usersRepo.hardDelete(id);
+      await Promise.all([
+        invalidateAuthUserCache(),
+        invalidateUserRecommendationsCache(id),
+      ]);
       return {
         message: "User permanently deleted",
         deleted: true,
@@ -214,6 +232,10 @@ export class UsersService {
     }
 
     await this.usersRepo.softDelete(id);
+    await Promise.all([
+      invalidateAuthUserCache(),
+      invalidateUserRecommendationsCache(id),
+    ]);
     return {
       message: "User successfully deactivated (status set to deleted)",
       deleted: true,

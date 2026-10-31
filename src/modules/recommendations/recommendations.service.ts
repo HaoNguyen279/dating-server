@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { cacheService, type CacheService } from "../../lib/cache.js";
 import { RecommendationsRepository, type RecommendationCandidate, type RecommendationViewerContext } from "./recommendations.repository.js";
 import type { RecommendationQuery } from "./recommendations.validation.js";
 import {
@@ -14,6 +16,7 @@ import {
 } from "./recommendation-scoring.js";
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const FEED_CACHE_TTL_SECONDS = 300;
 const CURSOR_SEPARATOR = ":";
 
 export class RecommendationsHttpError extends Error {
@@ -27,11 +30,26 @@ export class RecommendationsService {
   constructor(
     private readonly recommendationsRepo: RecommendationsRepository,
     private readonly clock: () => Date = () => new Date(),
+    private readonly cache: Pick<CacheService, "getOrSet"> = cacheService,
   ) {}
 
   async getRecommendations(userId: string, query: RecommendationQuery) {
+    return this.cache.getOrSet(
+      getRecommendationFeedCacheKey(userId, query),
+      FEED_CACHE_TTL_SECONDS,
+      () => this.loadRecommendations(userId, query),
+    );
+  }
+
+  private async loadRecommendations(userId: string, query: RecommendationQuery) {
     const now = this.clock();
     const viewer = await this.requireActiveViewer(userId);
+    const group = query.groupSlug
+      ? await this.recommendationsRepo.findActiveGroupBySlug(query.groupSlug)
+      : null;
+    if (query.groupSlug && !group) {
+      throw new RecommendationsHttpError(404, "Discovery group not found");
+    }
 
     if (query.cursor) {
       const cursor = decodeCursor(query.cursor);
@@ -43,11 +61,22 @@ export class RecommendationsService {
       if (!session || cursor.position > session._count.items) {
         throw new RecommendationsHttpError(400, "Invalid or expired recommendation cursor");
       }
+      if (
+        (session.discovery_group_id ?? null) !== (group?.id ?? null) ||
+        (session.relationship_intention_filter ?? null) !== (query.relationshipIntention ?? null)
+      ) {
+        throw new RecommendationsHttpError(400, "Cursor does not match the requested recommendation feed");
+      }
       return this.readSnapshotPage(viewer, session, cursor.position, query.limit, now);
     }
 
     await this.recommendationsRepo.deleteExpiredSessions(now);
-    const candidates = await this.recommendationsRepo.findCandidates({ viewer, now });
+    const candidates = await this.recommendationsRepo.findCandidates({
+      viewer,
+      now,
+      discoveryGroupId: group?.id ?? null,
+      relationshipIntention: query.relationshipIntention ?? null,
+    });
     const viewerPerson = toRecommendationPerson(viewer);
     const scored = candidates
       .filter((candidate) =>
@@ -84,6 +113,10 @@ export class RecommendationsService {
         score,
         missingFeatures,
       })),
+      {
+        discoveryGroupId: group?.id ?? null,
+        relationshipIntention: query.relationshipIntention ?? null,
+      },
     );
     const page = scored
       .slice(0, query.limit)
@@ -132,6 +165,8 @@ export class RecommendationsService {
     viewer: RecommendationViewerContext,
     session: {
       id: string;
+      discovery_group_id: string | null;
+      relationship_intention_filter: string | null;
       ranking_version: string;
       expires_at: Date;
       _count: { items: number };
@@ -159,6 +194,8 @@ export class RecommendationsService {
         viewer,
         now,
         candidateUserIds: items.map((item) => item.candidate_user_id),
+        discoveryGroupId: session.discovery_group_id,
+        relationshipIntention: session.relationship_intention_filter,
       });
       const eligibleByUserId = new Map(eligible.map((candidate) => [candidate.user_id, candidate]));
       const viewerPerson = toRecommendationPerson(viewer);
@@ -188,6 +225,26 @@ export class RecommendationsService {
       },
     };
   }
+}
+
+function getRecommendationFeedCacheKey(
+  userId: string,
+  query: RecommendationQuery,
+): string {
+  const queryHash = createHash("sha256")
+    .update(JSON.stringify({
+      limit: query.limit,
+      cursor: query.cursor ?? null,
+      groupSlug: query.groupSlug ?? null,
+      relationshipIntention: query.relationshipIntention ?? null,
+    }))
+    .digest("hex");
+
+  return `recommendations:feed:v1:${userId}:${queryHash}`;
+}
+
+export function invalidateUserRecommendationsCache(userId: string): Promise<void> {
+  return cacheService.delByPattern(`recommendations:*:${userId}:*`);
 }
 
 function toPublicCandidate(

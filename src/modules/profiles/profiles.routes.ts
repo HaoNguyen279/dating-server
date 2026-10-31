@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireChatAuth } from "../chat/chat.auth.js";
 import { profilesController } from "./profiles.container.js";
 
 const router = Router();
@@ -6,6 +7,9 @@ const router = Router();
 // List & Create
 router.get("/", (req, res) => profilesController.list(req, res));
 router.post("/", (req, res) => profilesController.create(req, res));
+router.patch("/me/relationship-intention", requireChatAuth, (req, res) =>
+  profilesController.updateMyRelationshipIntention(req, res),
+);
 
 // User-centric profile endpoints (must come before /:id)
 router.get("/user/:userId", (req, res) => profilesController.getByUserId(req, res));

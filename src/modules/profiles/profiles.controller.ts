@@ -1,10 +1,12 @@
 import type { Request, Response } from "express";
+import { getChatAuth } from "../chat/chat.auth.js";
 import {
   createProfileSchema,
   listProfilesQuerySchema,
   profileIdParamSchema,
   profileUserIdParamSchema,
   updateProfileSchema,
+  relationshipIntentionUpdateSchema,
 } from "./profiles.validation.js";
 import { ProfilesHttpError, ProfilesService } from "./profiles.service.js";
 
@@ -185,6 +187,29 @@ export class ProfilesController {
       });
     } catch (error) {
       return this.handleError(res, error, "updateByUserId");
+    }
+  }
+
+  async updateMyRelationshipIntention(req: Request, res: Response) {
+    try {
+      const bodyResult = relationshipIntentionUpdateSchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid relationship intention",
+          errors: bodyResult.error.flatten().fieldErrors,
+        });
+      }
+
+      const userId = getChatAuth(res).userId;
+      const profile = await this.profilesService.updateByUserId(userId, bodyResult.data);
+      return res.status(200).json({
+        success: true,
+        message: "Relationship intention updated successfully",
+        data: profile,
+      });
+    } catch (error) {
+      return this.handleError(res, error, "updateMyRelationshipIntention");
     }
   }
 

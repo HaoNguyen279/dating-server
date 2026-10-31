@@ -78,17 +78,22 @@ class FakeRecommendationsRepository {
   viewer = viewerContext();
   candidates: RecommendationCandidate[] = [];
   eligibleUserIds = new Set<string>();
+  viewerReads = 0;
+  candidateReads = 0;
+  sessionWrites = 0;
   sessionOwner: string | null = null;
   snapshot: Array<{ candidateUserId: string; score: number; missingFeatures: string[] }> = [];
   impressions = new Set<string>();
 
   async findDiscoveryContext() {
+    this.viewerReads++;
     return this.viewer;
   }
 
   async deleteExpiredSessions() {}
 
   async findCandidates(options: { candidateUserIds?: string[] }) {
+    this.candidateReads++;
     return this.candidates.filter(
       (item) =>
         this.eligibleUserIds.has(item.user_id) &&
@@ -97,6 +102,7 @@ class FakeRecommendationsRepository {
   }
 
   async createRankingSession(userId: string, _version: string, _expiry: Date, items: typeof this.snapshot) {
+    this.sessionWrites++;
     this.sessionOwner = userId;
     this.snapshot = items;
     return { id: sessionId };
@@ -136,9 +142,45 @@ class FakeRecommendationsRepository {
   }
 }
 
-function serviceFor(repository: FakeRecommendationsRepository) {
-  return new RecommendationsService(repository as never, () => new Date(now));
+class MemoryCache {
+  private readonly values = new Map<string, unknown>();
+
+  async getOrSet<T>(_key: string, _ttlSeconds: number, fetcher: () => Promise<T>): Promise<T> {
+    if (this.values.has(_key)) return this.values.get(_key) as T;
+    const value = await fetcher();
+    this.values.set(_key, value);
+    return value;
+  }
 }
+
+function serviceFor(
+  repository: FakeRecommendationsRepository,
+  cache: Pick<MemoryCache, "getOrSet"> = new MemoryCache(),
+) {
+  return new RecommendationsService(repository as never, () => new Date(now), cache);
+}
+
+test("feed cache hit returns immediately without querying or writing a snapshot", async () => {
+  const repo = new FakeRecommendationsRepository();
+  const cachedResponse = {
+    data: [{ user_id: "cached-candidate" }],
+    pagination: { limit: 20, sessionId, nextCursor: null },
+  };
+  const cache = {
+    async getOrSet<T>(key: string, ttlSeconds: number, _fetcher: () => Promise<T>) {
+      assert.match(key, /^recommendations:feed:v1:viewer-user:/);
+      assert.equal(ttlSeconds, 300);
+      return cachedResponse as T;
+    },
+  };
+
+  const result = await serviceFor(repo, cache).getRecommendations("viewer-user", { limit: 20 });
+
+  assert.strictEqual(result, cachedResponse);
+  assert.equal(repo.viewerReads, 0);
+  assert.equal(repo.candidateReads, 0);
+  assert.equal(repo.sessionWrites, 0);
+});
 
 test("ranked results sort by score then a stable user ID tie-breaker", async () => {
   const repo = new FakeRecommendationsRepository();

@@ -1,4 +1,6 @@
 import type { gender_type } from "../../generated/prisma/enums.js";
+import { cacheService } from "../../lib/cache.js";
+import { invalidateUserRecommendationsCache } from "../recommendations/recommendations.service.js";
 import {
   ProfilesRepository,
   type FindProfilesOptions,
@@ -106,11 +108,16 @@ export class ProfilesService {
   }
 
   async getByUserId(userId: string, includeUser = false, includePhotos = false) {
-    const profile = await this.profilesRepo.findByUserId(userId, includeUser, includePhotos);
-    if (!profile) {
-      throw new ProfilesHttpError(404, `Profile for user '${userId}' not found`);
-    }
-    return profile;
+    const key = includeUser || includePhotos
+      ? `profile:v1:${userId}:user:${includeUser}:photos:${includePhotos}`
+      : `profile:v1:${userId}`;
+    return cacheService.getOrSet(key, 1_800, async () => {
+      const profile = await this.profilesRepo.findByUserId(userId, includeUser, includePhotos);
+      if (!profile) {
+        throw new ProfilesHttpError(404, `Profile for user '${userId}' not found`);
+      }
+      return profile;
+    });
   }
 
   async create(input: CreateProfileInput) {
@@ -126,15 +133,17 @@ export class ProfilesService {
 
     const birthDate = input.birth_date instanceof Date ? input.birth_date : new Date(input.birth_date);
 
-    return this.profilesRepo.create(input.user_id, {
+    const profile = await this.profilesRepo.create(input.user_id, {
       ...input,
       birth_date: birthDate,
       gender: input.gender as gender_type,
     });
+    await this.invalidateUserCaches(input.user_id);
+    return profile;
   }
 
   async updateById(id: string, input: UpdateProfileInput) {
-    await this.getById(id);
+    const existing = await this.getById(id);
 
     const updateData: ProfileData = {
       ...input,
@@ -142,7 +151,9 @@ export class ProfilesService {
       birth_date: input.birth_date ? (input.birth_date instanceof Date ? input.birth_date : new Date(input.birth_date)) : undefined,
     };
 
-    return this.profilesRepo.updateById(id, updateData);
+    const profile = await this.profilesRepo.updateById(id, updateData);
+    await this.invalidateUserCaches(existing.user_id);
+    return profile;
   }
 
   async updateByUserId(userId: string, input: UpdateProfileInput) {
@@ -154,7 +165,9 @@ export class ProfilesService {
       birth_date: input.birth_date ? (input.birth_date instanceof Date ? input.birth_date : new Date(input.birth_date)) : undefined,
     };
 
-    return this.profilesRepo.updateByUserId(userId, updateData);
+    const profile = await this.profilesRepo.updateByUserId(userId, updateData);
+    await this.invalidateUserCaches(userId);
+    return profile;
   }
 
   async upsertByUserId(userId: string, input: CreateProfileInput) {
@@ -165,22 +178,34 @@ export class ProfilesService {
 
     const birthDate = input.birth_date instanceof Date ? input.birth_date : new Date(input.birth_date);
 
-    return this.profilesRepo.upsertByUserId(userId, {
+    const profile = await this.profilesRepo.upsertByUserId(userId, {
       ...input,
       birth_date: birthDate,
       gender: input.gender as gender_type,
     });
+    await this.invalidateUserCaches(userId);
+    return profile;
   }
 
   async deleteById(id: string) {
-    await this.getById(id);
+    const profile = await this.getById(id);
     await this.profilesRepo.deleteById(id);
+    await this.invalidateUserCaches(profile.user_id);
     return { message: "Profile successfully deleted", deleted: true };
   }
 
   async deleteByUserId(userId: string) {
     await this.getByUserId(userId);
     await this.profilesRepo.deleteByUserId(userId);
+    await this.invalidateUserCaches(userId);
     return { message: "Profile successfully deleted", deleted: true };
+  }
+
+  private async invalidateUserCaches(userId: string) {
+    await Promise.all([
+      cacheService.delByPattern(`profile:v1:${userId}*`),
+      cacheService.delByPattern(`profile:${userId}*`),
+      invalidateUserRecommendationsCache(userId),
+    ]);
   }
 }

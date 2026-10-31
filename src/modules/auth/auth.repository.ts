@@ -1,4 +1,5 @@
 import prisma from "../../lib/prisma.js";
+import { getCachedFirebaseUser, getCachedGoogleUser, invalidateAuthUserCache } from "../../middlewares/authenticate.js";
 
 const authUserSelect = {
   id: true,
@@ -47,10 +48,7 @@ export class AuthRepository {
   }
 
   async findByGoogleSub(googleSub: string) {
-    return prisma.users.findUnique({
-      where: { google_sub: googleSub },
-      select: authUserSelect,
-    });
+    return getCachedGoogleUser(googleSub);
   }
 
   async createGoogleUser(googleSub: string, email: string | null) {
@@ -65,7 +63,7 @@ export class AuthRepository {
   }
 
   async recordSignIn(id: string) {
-    return prisma.users.update({
+    const user = await prisma.users.update({
       where: { id },
       data: {
         last_active_at: new Date(),
@@ -73,13 +71,12 @@ export class AuthRepository {
       },
       select: authUserSelect,
     });
+    await invalidateAuthUserCache();
+    return user;
   }
 
   async findByFirebaseUid(firebaseUid: string) {
-    return prisma.users.findUnique({
-      where: { firebase_uid: firebaseUid },
-      select: authUserSelect,
-    });
+    return getCachedFirebaseUser(firebaseUid);
   }
 
   async createFirebaseUser(firebaseUid: string, email: string | null) {
@@ -94,7 +91,7 @@ export class AuthRepository {
   }
 
   async linkFirebaseToExisting(id: string, firebaseUid: string) {
-    return prisma.users.update({
+    const user = await prisma.users.update({
       where: { id },
       data: {
         firebase_uid: firebaseUid,
@@ -102,6 +99,8 @@ export class AuthRepository {
       },
       select: authUserSelect,
     });
+    await invalidateAuthUserCache();
+    return user;
   }
 
   async setProfileVerifiedByFirebaseUid(firebaseUid: string, isVerified: boolean) {

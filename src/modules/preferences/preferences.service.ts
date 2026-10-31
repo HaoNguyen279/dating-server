@@ -1,4 +1,6 @@
 import type { interested_type } from "../../generated/prisma/enums.js";
+import { cacheService } from "../../lib/cache.js";
+import { invalidateUserRecommendationsCache } from "../recommendations/recommendations.service.js";
 import type { CreatePreferenceInput, ListPreferencesQuery, UpdatePreferenceInput } from "./preferences.validation.js";
 import { PreferencesRepository, type PreferenceData, type PreferenceWhere } from "./preferences.repository.js";
 
@@ -36,9 +38,11 @@ export class PreferencesService {
   }
 
   async getByUserId(userId: string) {
-    const preference = await this.preferencesRepo.findByUserId(userId);
-    if (!preference) throw new PreferencesHttpError(404, `Preferences for user '${userId}' not found`);
-    return preference;
+    return cacheService.getOrSet(`preferences:v1:${userId}`, 1_800, async () => {
+      const preference = await this.preferencesRepo.findByUserId(userId);
+      if (!preference) throw new PreferencesHttpError(404, `Preferences for user '${userId}' not found`);
+      return preference;
+    });
   }
 
   async create(input: CreatePreferenceInput) {
@@ -49,31 +53,45 @@ export class PreferencesService {
     this.validateMergedAgeRange(18, 99, input);
 
     const { user_id, ...data } = input;
-    return this.preferencesRepo.create(user_id, data as PreferenceData);
+    const preference = await this.preferencesRepo.create(user_id, data as PreferenceData);
+    await this.invalidateUserCaches(user_id);
+    return preference;
   }
 
   async upsert(userId: string, input: UpdatePreferenceInput) {
     await this.ensureUserExists(userId);
     const existing = await this.preferencesRepo.findByUserId(userId);
     this.validateMergedAgeRange(existing?.age_min ?? 18, existing?.age_max ?? 99, input);
-    return this.preferencesRepo.upsertByUserId(userId, input as PreferenceData);
+    const preference = await this.preferencesRepo.upsertByUserId(userId, input as PreferenceData);
+    await this.invalidateUserCaches(userId);
+    return preference;
   }
 
   async update(userId: string, input: UpdatePreferenceInput) {
     const existing = await this.getByUserId(userId);
     this.validateMergedAgeRange(existing.age_min, existing.age_max, input);
-    return this.preferencesRepo.updateByUserId(userId, input as PreferenceData);
+    const preference = await this.preferencesRepo.updateByUserId(userId, input as PreferenceData);
+    await this.invalidateUserCaches(userId);
+    return preference;
   }
 
   async delete(userId: string) {
     await this.getByUserId(userId);
     await this.preferencesRepo.deleteByUserId(userId);
+    await this.invalidateUserCaches(userId);
   }
 
   private async ensureUserExists(userId: string) {
     if (!(await this.preferencesRepo.userExists(userId))) {
       throw new PreferencesHttpError(404, `User '${userId}' not found`);
     }
+  }
+
+  private async invalidateUserCaches(userId: string) {
+    await Promise.all([
+      cacheService.del(`preferences:v1:${userId}`, `preferences:${userId}`),
+      invalidateUserRecommendationsCache(userId),
+    ]);
   }
 
   private validateMergedAgeRange(

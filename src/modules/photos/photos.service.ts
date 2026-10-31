@@ -1,5 +1,7 @@
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "node:stream";
+import { cacheService } from "../../lib/cache.js";
+import { invalidateUserRecommendationsCache } from "../recommendations/recommendations.service.js";
 import {
   PhotoLimitError,
   PhotosRepository,
@@ -61,6 +63,7 @@ export class PhotosService {
         await this.destroyUploadedAsset(uploadResult.public_id);
         throw new PhotoManagementError(404, "User not found");
       }
+      await this.invalidateUserCaches(userId);
       return photo;
     } catch (error) {
       if (error instanceof PhotoLimitError) {
@@ -76,7 +79,9 @@ export class PhotosService {
   }
 
   async setOrder(userId: string, orderedPhotoIds: string[]) {
-    return this.photosRepository.setOrder(userId, orderedPhotoIds);
+    const photos = await this.photosRepository.setOrder(userId, orderedPhotoIds);
+    await this.invalidateUserCaches(userId);
+    return photos;
   }
 
   async setPrimary(userId: string, photoId: string) {
@@ -84,7 +89,7 @@ export class PhotosService {
     if (!photos.some((photo) => photo.id === photoId)) {
       throw new PhotoManagementError(404, "Photo not found");
     }
-    return this.photosRepository.setOrder(userId, [
+    return this.setOrder(userId, [
       photoId,
       ...photos.filter((photo) => photo.id !== photoId).map((photo) => photo.id),
     ]);
@@ -114,6 +119,7 @@ export class PhotosService {
     }
 
     await this.photosRepository.deleteForUser(userId, photoId);
+    await this.invalidateUserCaches(userId);
     return {
       id: photo.id,
       cloudinaryDeleted,
@@ -153,6 +159,14 @@ export class PhotosService {
     } catch {
       return null;
     }
+  }
+
+  private async invalidateUserCaches(userId: string) {
+    await Promise.all([
+      cacheService.delByPattern(`profile:v1:${userId}*`),
+      cacheService.delByPattern(`profile:${userId}*`),
+      invalidateUserRecommendationsCache(userId),
+    ]);
   }
 
   private getCloudinaryConfig() {

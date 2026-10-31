@@ -10,6 +10,7 @@ import matchesRouter from "./modules/matches/matches.routes.js";
 import recommendationsRouter from "./modules/recommendations/recommendations.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import chatRouter from "./modules/chat/chat.routes.js";
+import discoveryGroupsRouter from "./modules/discovery-groups/discovery-groups.routes.js";
 import { notFoundHandler } from "./middlewares/not-found.js";
 import { errorHandler } from "./middlewares/error-handler.js";
 
@@ -36,6 +37,7 @@ app.use("/api/preferences", preferencesRouter);
 app.use("/api/matches", matchesRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/recommendations", recommendationsRouter);
+app.use("/api/discovery-groups", discoveryGroupsRouter);
 app.use("/auth", authRouter);
 
 app.use(notFoundHandler);
